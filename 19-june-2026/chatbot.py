@@ -8,7 +8,7 @@ logger = logging.getLogger(__name__)
 
 llm = ChatGoogleGenerativeAI(
     model="gemini-2.5-flash",
-    temperature=0.7
+    temperature=0.3
 )
 
 

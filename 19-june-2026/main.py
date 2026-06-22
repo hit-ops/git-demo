@@ -1,10 +1,17 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Header
+from pydantic import EmailStr
+import logging
+
 from database import engine, SessionLocal
 from models import Base, User, ChatHistory
-from auth import hash_password, verify_password
+from auth import (
+    hash_password,
+    verify_password,
+    create_access_token,
+    verify_token
+)
 from chatbot import get_response
 from memory import save_message, get_conversation
-import logging
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -24,14 +31,16 @@ def home():
 
 # Register User
 @app.post("/register")
-def register(email: str, password: str):
-    if not email or not password:
-        raise HTTPException(status_code=400, detail="Email and password are required")
-    
+def register(email: EmailStr, password: str):
+
     if len(password) < 6:
-        raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
+        raise HTTPException(
+            status_code=400,
+            detail="Password must be at least 6 characters"
+        )
 
     db = SessionLocal()
+
     try:
         existing_user = (
             db.query(User)
@@ -40,7 +49,10 @@ def register(email: str, password: str):
         )
 
         if existing_user:
-            raise HTTPException(status_code=400, detail="Email already exists")
+            raise HTTPException(
+                status_code=400,
+                detail="Email already exists"
+            )
 
         hashed_password = hash_password(password)
 
@@ -57,23 +69,29 @@ def register(email: str, password: str):
             "message": "User Registered Successfully",
             "user_id": user.id
         }
+
     except HTTPException:
         raise
+
     except Exception as e:
         db.rollback()
-        logger.error(f"Error during registration: {str(e)}")
-        raise HTTPException(status_code=500, detail="Registration failed")
+        logger.error(f"Registration Error: {str(e)}")
+
+        raise HTTPException(
+            status_code=500,
+            detail="Registration failed"
+        )
+
     finally:
         db.close()
 
 
 # Login User
 @app.post("/login")
-def login(email: str, password: str):
-    if not email or not password:
-        raise HTTPException(status_code=400, detail="Email and password are required")
+def login(email: EmailStr, password: str):
 
     db = SessionLocal()
+
     try:
         user = (
             db.query(User)
@@ -82,30 +100,76 @@ def login(email: str, password: str):
         )
 
         if not user:
-            raise HTTPException(status_code=401, detail="User not found")
+            raise HTTPException(
+                status_code=401,
+                detail="User not found"
+            )
 
         if not verify_password(
             password,
             user.password
         ):
-            raise HTTPException(status_code=401, detail="Invalid Password")
+            raise HTTPException(
+                status_code=401,
+                detail="Invalid Password"
+            )
+
+        access_token = create_access_token(
+            {"user_id": user.id}
+        )
 
         return {
             "message": "Login Successful",
-            "user_id": user.id
+            "access_token": access_token,
+            "token_type": "bearer"
         }
+
     except HTTPException:
         raise
+
     except Exception as e:
-        logger.error(f"Error during login: {str(e)}")
-        raise HTTPException(status_code=500, detail="Login failed")
+        logger.error(f"Login Error: {str(e)}")
+
+        raise HTTPException(
+            status_code=500,
+            detail="Login failed"
+        )
+
     finally:
         db.close()
 
 
 # Chat Endpoint
+from fastapi import Header, HTTPException
+
 @app.post("/chat")
-def chat(user_id: int, message: str):
+def chat(
+        message: str,
+        authorization: str = Header(
+            None,
+            alias="Authorization"
+        )
+):
+    print("HEADER =", authorization)
+
+    if not authorization:
+        raise HTTPException(
+            status_code=401,
+            detail="Authorization header missing"
+        )
+
+    if not authorization.startswith("Bearer "):
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid Authorization header"
+        )
+
+    token = authorization.replace(
+        "Bearer ",
+        ""
+    )
+
+    user_id = verify_token(token)
 
     if not message or not message.strip():
         raise HTTPException(
@@ -116,16 +180,28 @@ def chat(user_id: int, message: str):
     db = SessionLocal()
 
     try:
+        user = (
+            db.query(User)
+            .filter(User.id == user_id)
+            .first()
+        )
+
+        if not user:
+            raise HTTPException(
+                status_code=404,
+                detail="User not found"
+            )
+
         # Get previous conversation from Redis
         history = get_conversation(user_id) or []
 
-        # Get response using history + current message
+        # Get response from Gemini
         response = get_response(
             history,
             message
         )
 
-        # Save conversation in Redis
+        # Save in Redis
         save_message(
             user_id,
             "Human",
@@ -138,7 +214,7 @@ def chat(user_id: int, message: str):
             response
         )
 
-        # Save permanent history in SQLite
+        # Save in SQLite
         chat_record = ChatHistory(
             user_id=user_id,
             question=message,
@@ -154,9 +230,15 @@ def chat(user_id: int, message: str):
             "chat_id": chat_record.id
         }
 
+    except HTTPException:
+        raise
+
     except Exception as e:
         db.rollback()
-        logger.error(f"Error during chat: {str(e)}")
+
+        logger.error(
+            f"Chat Error: {str(e)}"
+        )
 
         raise HTTPException(
             status_code=500,
