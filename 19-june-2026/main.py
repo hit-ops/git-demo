@@ -1,4 +1,12 @@
-from fastapi import FastAPI, HTTPException, Header
+from fastapi import (
+    FastAPI,
+    HTTPException,
+    Depends
+)
+from fastapi.security import (
+    HTTPBearer,
+    HTTPAuthorizationCredentials
+)
 from pydantic import EmailStr
 import logging
 
@@ -11,12 +19,17 @@ from auth import (
     verify_token
 )
 from chatbot import get_response
-from memory import save_message, get_conversation
+from memory import (
+    save_message,
+    get_conversation
+)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = FastAPI()
+
+security = HTTPBearer()
 
 # Create tables
 Base.metadata.create_all(bind=engine)
@@ -29,10 +42,12 @@ def home():
     }
 
 
-# Register User
+# ---------------- REGISTER ----------------
 @app.post("/register")
-def register(email: EmailStr, password: str):
-
+def register(
+        email: EmailStr,
+        password: str
+):
     if len(password) < 6:
         raise HTTPException(
             status_code=400,
@@ -75,7 +90,10 @@ def register(email: EmailStr, password: str):
 
     except Exception as e:
         db.rollback()
-        logger.error(f"Registration Error: {str(e)}")
+
+        logger.error(
+            f"Registration Error: {str(e)}"
+        )
 
         raise HTTPException(
             status_code=500,
@@ -86,10 +104,12 @@ def register(email: EmailStr, password: str):
         db.close()
 
 
-# Login User
+# ---------------- LOGIN ----------------
 @app.post("/login")
-def login(email: EmailStr, password: str):
-
+def login(
+        email: EmailStr,
+        password: str
+):
     db = SessionLocal()
 
     try:
@@ -106,8 +126,8 @@ def login(email: EmailStr, password: str):
             )
 
         if not verify_password(
-            password,
-            user.password
+                password,
+                user.password
         ):
             raise HTTPException(
                 status_code=401,
@@ -115,7 +135,9 @@ def login(email: EmailStr, password: str):
             )
 
         access_token = create_access_token(
-            {"user_id": user.id}
+            {
+                "user_id": user.id
+            }
         )
 
         return {
@@ -128,7 +150,9 @@ def login(email: EmailStr, password: str):
         raise
 
     except Exception as e:
-        logger.error(f"Login Error: {str(e)}")
+        logger.error(
+            f"Login Error: {str(e)}"
+        )
 
         raise HTTPException(
             status_code=500,
@@ -139,39 +163,17 @@ def login(email: EmailStr, password: str):
         db.close()
 
 
-# Chat Endpoint
-from fastapi import Header, HTTPException
-
+# ---------------- CHAT ----------------
 @app.post("/chat")
 def chat(
         message: str,
-        authorization: str = Header(
-            None,
-            alias="Authorization"
-        )
+        credentials: HTTPAuthorizationCredentials = Depends(security)
 ):
-    print("HEADER =", authorization)
-
-    if not authorization:
-        raise HTTPException(
-            status_code=401,
-            detail="Authorization header missing"
-        )
-
-    if not authorization.startswith("Bearer "):
-        raise HTTPException(
-            status_code=401,
-            detail="Invalid Authorization header"
-        )
-
-    token = authorization.replace(
-        "Bearer ",
-        ""
-    )
+    token = credentials.credentials
 
     user_id = verify_token(token)
 
-    if not message or not message.strip():
+    if not message.strip():
         raise HTTPException(
             status_code=400,
             detail="Message cannot be empty"
