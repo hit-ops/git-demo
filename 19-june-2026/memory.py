@@ -1,23 +1,51 @@
+import json
 from redis_client import redis_client
 
-
-def save_message(user_id, role, message):
-    key = f"chat:{user_id}"
-
-    redis_client.rpush(
-        key,
-        f"{role}: {message}"
-    )
-
-    # Keep only the last 20 messages
-    redis_client.ltrim(key, -20, -1)
+TTL_12_HOURS = 12 * 60 * 60
+MAX_TURNS = 10
 
 
-def get_conversation(user_id):
-    key = f"chat:{user_id}"
+def load_history(session_id: str) -> list:
+    """Read conversation history."""
 
-    return redis_client.lrange(
-        key,
-        0,
-        -1
-    )
+    try:
+        data = redis_client.get(f"conv:{session_id}")
+        return json.loads(data) if data else []
+
+    except Exception:
+        return []
+
+
+def save_turn(
+    session_id: str,
+    history: list,
+    question: str,
+    answer: str
+) -> list:
+    """Save one user question and assistant answer."""
+
+    new_history = history + [
+        {
+            "role": "user",
+            "content": question
+        },
+        {
+            "role": "assistant",
+            "content": answer
+        }
+    ]
+
+    if len(new_history) > MAX_TURNS * 2:
+        new_history = new_history[-MAX_TURNS * 2:]
+
+    try:
+        redis_client.setex(
+            f"conv:{session_id}",
+            TTL_12_HOURS,
+            json.dumps(new_history)
+        )
+
+    except Exception as e:
+        print(f"[memory] save failed: {e}")
+
+    return new_history

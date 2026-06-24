@@ -1,16 +1,20 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from jose import jwt, JWTError
 from fastapi import HTTPException
 from passlib.context import CryptContext
+from dotenv import load_dotenv
+import os
+
+load_dotenv()
 
 pwd_context = CryptContext(
     schemes=["bcrypt"],
     deprecated="auto"
-    
 )
-SECRET_KEY = "mysecretkey123"
-ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 60
+
+SECRET_KEY = os.getenv("SECRET_KEY", "your-secret-key-change-this")
+ALGORITHM = os.getenv("ALGORITHM", "HS256")
+ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", 60))
 
 
 def hash_password(password):
@@ -27,7 +31,7 @@ def verify_password(
 def create_access_token(data: dict):
     to_encode = data.copy()
 
-    expire = datetime.utcnow() + timedelta(
+    expire = datetime.now(timezone.utc) + timedelta(
         minutes=ACCESS_TOKEN_EXPIRE_MINUTES
     )
 

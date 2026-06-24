@@ -20,8 +20,8 @@ from auth import (
 )
 from chatbot import get_response
 from memory import (
-    save_message,
-    get_conversation
+    load_history,
+    save_turn
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -195,7 +195,7 @@ def chat(
             )
 
         # Get previous conversation from Redis
-        history = get_conversation(user_id) or []
+        history = load_history(str(user_id))
 
         # Get response from Gemini
         response = get_response(
@@ -204,15 +204,10 @@ def chat(
         )
 
         # Save in Redis
-        save_message(
-            user_id,
-            "Human",
-            message
-        )
-
-        save_message(
-            user_id,
-            "AI",
+        save_turn(
+            str(user_id),
+            history,
+            message,
             response
         )
 
